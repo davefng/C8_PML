@@ -1,0 +1,228 @@
+---
+title: "PML_Project"
+author: "David"
+date: "July 15, 2015"
+output: html_document
+---
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+setwd('C:/Users/DF/Desktop/Coursera/C8_PracticalMachineLearning')
+library(caret); library(knitr)
+```
+
+## SYNOPSIS
+This project involves predicting the manner in which a group of 6 participants performed a set of exercises.  Using an accelerometer on the belt, forearm, arm, and dumbell, each participant took measurements about themselves.  The participants performed barbell lifts in 5 different ways.  Using the data, we will attempt to predict the "classe" variable.  Different modeling methods are used, including Classification and Regression Trees (CART) via rpart package, CART using the tree package, conditional inference and recursive partitioning trees using the party package, and random forests.  It will be seen that building a classification tree using the *party* package and a random forest model are the two best models to predict the variable "classe".
+
+## DATA PREPARATION
+
+```{r}
+x <- read.csv('pml-training.csv', stringsAsFactors=FALSE)
+x$classe <- as.factor(x$classe)
+x$new_window <- as.factor(x$new_window)
+
+x[x==''] <- NA
+x2 <- x[,colSums(is.na(x)) < (nrow(x)/2)]
+x2 <- x2[,c(6:ncol(x2))]
+
+########## CREATE TRAINING AND TEST SET
+set.seed(10101)
+inTrain <- createDataPartition(y=x2$classe, p=0.8, list=FALSE)
+training <- x2[inTrain,]
+testing <- x2[-inTrain,]
+
+########## CREATE SUB TRAINING AND SUB TEST SET
+inTrain2 <- createDataPartition(y=training$classe, p=0.75, list=FALSE)
+subTrain <- training[inTrain2,]
+subTest <- training[-inTrain2,]
+
+nzv <- nearZeroVar(subTrain, saveMetrics=TRUE)
+subTrain <- subTrain[,c(-1,-2)]
+subTest <- subTest[,c(-1,-2)]
+testing <- testing[,c(-1,-2)]
+########## ABOVE REMOVES NUM_WINDOW WHICH HAS ALMOST ZERO VARIANCE
+dim(subTrain); dim(subTest); dim(testing)
+```
+
+The data set contains `r dim(x)[1]` observations and `r dim(x)[2]` variables.  Many variables contained little or no data.  Hence, variables that had at least half of its data missing were removed, leaving the data set with `r dim(x2)[2]` variables.  In addition a test to determine which variables have near zero variance, revealed that the variable new_window have such small varaince that it would not be useful to explaining the variance in a model.  Therefore, the variable new_window and num_window were removed.  Note that the variable "classe" is the outcome variable.  This is a categorical variable and hence, this variable was changed to a factor variable.
+
+## Cross Validation
+There are enough observations to use the holdout method for cross validation.  Therefore, a test set and a training set were created, where the training set was partitioned further to create a validation set.  This created a training set containing 60% of the observations, a validation set contianing 20% of the observations, and a testing set containing 20% of the observations.  Hence, the following sets were created:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ds <- data.frame(rbind(dim(subTrain), dim(subTest), dim(testing)))
+names(ds) <- c('No of Observations','No of Variables')
+rownames(ds) <- c('Training Set (SubTrain)','Validation Set (SubTest)', 'Testing Set')
+kable(ds, caption="Dimensions of Each Partitioned Data Set")
+```
+
+## Methodology
+An attempt was made using the caret package in R.  However, due to the long run times, I found it much quicker to use each separate package independent of the caret package.  Hence, tree(), rpart(), cforest() via the party package, and randomForest() were used independent of the caret package function.
+
+### CART Method using rpart package
+The package *rpart* uses the Classification and Regression Trees to build a model.  This slightly differs from the original CART method because rpart uses recursive partitioning for trees.  First, a model was built using the default parameters of the rpart function.
+
+```{r rpartModel, message=FALSE, warning=FALSE}
+########## TRY A CLASSIFICATION TREE
+library(rpart); library(rattle)
+set.seed(8787)
+modRpart <- rpart(classe~., data=subTrain, method="class")
+##modRpart
+predRpart <- predict(modRpart, subTest, type="class")
+cmRpart <- confusionMatrix(predRpart, subTest$classe)
+plotcp(modRpart)
+```
+
+The accuracy is only `r cmRpart$overall[1]`.  A plot of the complexity parameter table using plotcp() shows that the tree can be pruned slightly, as shown below.
+
+```{r rpartModel2, message=FALSE, warning=FALSE}
+modRpart2 <- prune(modRpart, cp=.011)
+predRpart2 <- predict(modRpart2, subTest, type="class")
+fancyRpartPlot(modRpart2)
+cmRpart2 <- confusionMatrix(predRpart2, subTest$classe)
+```
+
+The following tree is what results from the rpart method after pruning the tree.  The accuracy is `r cmRpart2$overall[1]`.  While the accuracy rate isn't horrible, but the accuracy isn't outstanding either.  Other models will be formulated to determine if other methods not from the *rpart* package can produce better results for this data.
+
+### CART method using the tree package
+The package *tree* uses the Classification and Regression Trees to build a model.  Similar to *rpart*, this method also uses recursive partitioning for trees.  However, it differs from *rpart* in the way it handles certain covariates.  First, a model was built using the default parameters of the *tree* function.
+
+```{r tree1, message=FALSE, warning=FALSE}
+library(tree)
+set.seed(8787)
+modTree <- tree(classe~., data=subTrain)
+##plot(cv.tree(modTree))
+```
+
+Similar to the tree from the rpart package, this tree is also quite large and so we could try pruning the tree.  Although, we could not prune the tree much without significantly decreasing the accuracy rate, the following tree is what results from the tree method after pruning the tree.  
+
+```{r tree2}
+modTree2 <- prune.misclass(modTree, best=14)
+predTree <- predict(modTree, subTest, type="class")
+predTree2 <- predict(modTree2, subTest, type="class")
+plot(modTree2)
+text(modTree2,all=T)
+cmTree1 <- confusionMatrix(predTree, subTest$classe)
+cmTree2 <- confusionMatrix(predTree2, subTest$classe)
+```
+
+The accuracy rate from the pruned tree is `r cmTree1$overall[1]`.  This error rate is worse than the model built from the *rpart* package.  Hence, we will look further into developing a model from the *party* package and the *random forest* package.
+
+### Trees using the Party package
+The *party* package formulates a model using a technique of random forest and bagging enselmble algorithms utilizing recursive partitioning and conditional inference trees that embed tree structured regression models into conditional inference procedures.  It will be seen that this produces much better results than either tree built from the *tree* package or the *rpart* package.
+
+```{r, message=FALSE, warning=FALSE}
+library(party)
+set.seed(8787)
+modParty <- cforest(classe~., data=subTrain, controls=cforest_unbiased(ntree=50, mtry=3))
+predParty <- predict(modParty, subTest, OOB=TRUE, type="response")
+cmParty <- confusionMatrix(predParty, subTest$classe)
+```
+
+The tree resulting from the *party* package results in an accuracy rate of `r cmParty$overall[1]` on the validation data.  This is a huge improvement compared to the classification trees that resulted from the *rpart* and *tree* packages.
+
+```{r knnModel, echo=FALSE, eval=FALSE}
+library(class)
+modknn <- knn(classe~., data=training, k=3)
+predictGBM <- predict(modGBM, testing, n.trees=100, type="response")
+predGBMout <- apply(predictGBM, 1, which.max)
+##NOT USEFUL
+```
+
+### Trees using the Random Forest
+Although the classification tree from the *party* package resulted in excellent outcomes, a model using random forest will be constructed and compared with the classification tree from the *party* package.  First a model was built using the random forest method, using the default parameters as shown below.
+
+```{r rForest, message=FALSE, warning=FALSE}
+library(randomForest)
+set.seed(8787)
+modRF <- randomForest(classe~., data=subTrain, ntree=500)
+predRF <- predict(modRF, newdata=subTest)
+cmRF <- confusionMatrix(predRF,subTest$classe)
+modRF
+##OOB=0.79%, accuracy = .9949
+```
+
+One of the default parameters is growing and averaging 500 trees which could lead to useless tree builds and therefore, wasting time.  Reducing the number of trees used could result in a model that does not reduce the accuracy too much.  The accuracy rate using 500 trees to build the model is `r cmRF$overall[1]`.  A plot of the model (seen below) shows that around 50 trees would be sufficient in building a model using the random forest method.  Hence, the number of trees to grow will be reduced to 50.
+
+```{r rForest1}
+plot(modRF)
+set.seed(8787)
+modRF1 <- randomForest(classe~., data=subTrain, ntree=50)
+predRF1 <- predict(modRF1, newdata=subTest)
+cmRF1 <- confusionMatrix(predRF1,subTest$classe)
+##OOB=1.14%, accuracy = .9946
+```
+
+In addition, using the importance of predictors to be assessed will be used.  Comparing this to the model where the importance of predictors is not taken into consideration, there is a slight improvement in accuracy rate.  Below is the results when the number of trees grown is reduced to 50 and the variable importance is taken into consideration.
+
+```{r rForest2}
+set.seed(8787)
+modRF2 <- randomForest(classe~., data=subTrain, ntree=50, importance=T, proximity=T)
+modRF2
+predRF2 <- predict(modRF2, newdata=subTest)
+cmRF2 <- confusionMatrix(predRF2, subTest$classe)
+##OOB=1.04%, accuracy = .9936
+```
+
+The random forest model growing 50 trees and using variable importance produces an accuracy rate on the validation set to be `r cmRF2$overall[1]`.  The random forest model using 50 trees is much more efficient than the model using 500 trees with only a small drop in accuracy.  Hence, the random forest model growing 50 trees would be preferred to the random forest model using 500 trees.
+
+## CONCLUSION
+
+The table below shows the results of the accuracy rate on the validation set.  The two models that work best are the models from the *party* package and from the *random forest* package.  We will select the random forest model that takes into account variable importance and one that grows 50 trees.  We will use it on the testing set to determine the final out of sample error.
+
+```{r summary}
+totalAccuracy <- data.frame(rbind(c('Rpart',cmRpart2$overall[1]),
+                 c('Tree',cmTree2$overall[1]),
+                 c('Party',cmParty$overall[1]),
+                 c('Random Forest',cmRF2$overall[1])), stringsAsFactors=FALSE)
+totalAccuracy[,2] <- round(as.numeric(totalAccuracy[,2]),4)
+names(totalAccuracy)[1] <- 'Package'
+kable(totalAccuracy, caption="Dimensions of Each Partitioned Data Set")
+```
+
+
+```{r}
+predRF3 <- predict(modRF2, newdata=testing)
+cmRF3 <- confusionMatrix(predRF2, testing$classe)
+cmRF3
+```
+
+The final model chosen, modRF2, is the random forest model that grows 50 trees and takes into account variable importance.  The final accuracy is `r cmRF3$overall[1]`.  Therefore, the out of sample error is `r 100*(1-cmRF3$overall[1])`%. The variable importance plot can be seen below.  The Gini index shows that the most important variables are *roll belt* and *yaw belt* as shown below.
+
+```{r importanceVars}
+varImpPlot(modRF2)
+```
+
+
+```{r, echo=FALSE, eval=FALSE}
+set.seed(8787)
+tc <- trainControl(method = "cv", number = 7, verboseIter=FALSE , preProcOptions="pca", allowParallel=TRUE)
+##Six models are estimated: Random forest, Support Vector Machine (both radial and linear), a Neural net, a Bayes Generalized linear model and a Logit Boosted model.
+
+rf <- train(classe ~ ., data = training, method = "rf", trControl= tc)
+svmr <- train(classe ~ ., data = training, method = "svmRadial", trControl= tc)
+NN <- train(classe ~ ., data = training, method = "nnet", trControl= tc, verbose=FALSE)
+svml <- train(classe ~ ., data = training, method = "svmLinear", trControl= tc)
+bayesglm <- train(classe ~ ., data = training, method = "bayesglm", trControl= tc)
+logitboost <- train(classe ~ ., data = training, method = "LogitBoost", trControl= tc)
+
+rfpredict <- predict(rf, testing)
+
+```
+
+```{r testCases, echo=FALSE, evaluate=FALSE}
+tcases <- read.csv('pml-testing.csv', stringsAsFactors=FALSE)
+answers <- predict(modRF2, tcases)
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+##then create a folder where you want the files to be written. 
+##Set that to be your working directory and run:
+ 
+pml_write_files(answers)
+```
+```
