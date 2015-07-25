@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
-setwd('C:/Users/DF/Desktop/Coursera/C8_PracticalMachineLearning')
+setwd('C:/Users/DF/Desktop/Coursera/C8_PML')
 library(caret); library(knitr)
 ```
 
@@ -167,7 +167,7 @@ The random forest model growing 50 trees and using variable importance produces 
 
 ## CONCLUSION
 
-The table below shows the results of the accuracy rate on the validation set.  The two models that work best are the models from the *party* package and from the *random forest* package.  We will select the random forest model that takes into account variable importance and one that grows 50 trees.  We will use it on the testing set to determine the final out of sample error.
+The table below shows the results of the accuracy rate on the validation set.  The two models that work best are the models from the *party* package and from the *random forest* package.  
 
 ```{r summary}
 totalAccuracy <- data.frame(rbind(c('Rpart',cmRpart2$overall[1]),
@@ -179,19 +179,16 @@ names(totalAccuracy)[1] <- 'Package'
 kable(totalAccuracy, caption="Dimensions of Each Partitioned Data Set")
 ```
 
+We will select the random forest model that takes into account variable importance and one that grows 50 trees.  We will use it on the testing set to determine the final out of sample error as shown below.  The variable importance plot is also shown below.  The Gini index shows that the most important variables are *roll belt* and *yaw belt*.
 
 ```{r}
 predRF3 <- predict(modRF2, newdata=testing)
 cmRF3 <- confusionMatrix(predRF2, testing$classe)
 cmRF3
-```
-
-The final model chosen, modRF2, is the random forest model that grows 50 trees and takes into account variable importance.  The final accuracy is `r cmRF3$overall[1]`.  Therefore, the out of sample error is `r 100*(1-cmRF3$overall[1])`%. The variable importance plot can be seen below.  The Gini index shows that the most important variables are *roll belt* and *yaw belt* as shown below.
-
-```{r importanceVars}
 varImpPlot(modRF2)
 ```
 
+The final model chosen, modRF2, is the random forest model that grows 50 trees and takes into account variable importance.  The final accuracy is `r cmRF3$overall[1]`.  Therefore, the out of sample error is `r 100*(1-cmRF3$overall[1])`%. 
 
 ```{r, echo=FALSE, eval=FALSE}
 set.seed(8787)
@@ -209,10 +206,15 @@ rfpredict <- predict(rf, testing)
 
 ```
 
-```{r testCases, echo=FALSE, evaluate=FALSE}
+### Test Cases
+
+```{r testCases}
 tcases <- read.csv('pml-testing.csv', stringsAsFactors=FALSE)
 answers <- predict(modRF2, tcases)
+answers
+```
 
+```{r, echo=FALSE, evaluate=FALSE}
 pml_write_files = function(x){
   n = length(x)
   for(i in 1:n){
@@ -224,5 +226,4 @@ pml_write_files = function(x){
 ##Set that to be your working directory and run:
  
 pml_write_files(answers)
-```
 ```
